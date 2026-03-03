@@ -14,7 +14,7 @@ M._index = 1 -- next-to-show index when playing
 M._current = 0 -- last shown index
 M._mapped = false
 
-local function create_window(width)
+local function create_window(width, col)
 	-- Create a new buffer
 	local buf = vim.api.nvim_create_buf(false, true) -- unlisted, scratch
 	-- Calculate window dimensions
@@ -26,7 +26,7 @@ local function create_window(width)
 		width = win_width,
 		height = win_height,
 		row = 0,
-		col = 0,
+		col = col or 0,
 		style = "minimal",
 	})
 	return buf, win
@@ -44,8 +44,11 @@ local function ensure_window()
 		return
 	end
 
-	local left_buf, left_win = create_window(0.25)
-	local right_buf, right_win = create_window(0.75)
+	local left_col = 0
+	local right_col = math.floor(vim.o.columns * 0.25)
+
+	local left_buf, left_win = create_window(0.25, left_col)
+	local right_buf, right_win = create_window(0.75, right_col)
 
 	M.left_buf = left_buf
 	M.left_win = left_win
@@ -60,32 +63,30 @@ local function ensure_window()
 	end
 
 	-- buffer-local mappings for navigation: use counts like 3l or 2h
-	if not M._mapped then
-		for _, buf in ipairs({ left_buf, right_buf }) do
-			vim.api.nvim_buf_set_keymap(
-				buf,
-				"n",
-				"l",
-				'<cmd>lua require("gitmovie")._on_nav(vim.v.count1)<CR>',
-				{ noremap = true, silent = true }
-			)
-			vim.api.nvim_buf_set_keymap(
-				buf,
-				"n",
-				"h",
-				'<cmd>lua require("gitmovie")._on_nav(-vim.v.count1)<CR>',
-				{ noremap = true, silent = true }
-			)
-			vim.api.nvim_buf_set_keymap(
-				buf,
-				"n",
-				"q",
-				'<cmd>lua require("gitmovie").stop()<CR>',
-				{ noremap = true, silent = true }
-			)
-		end
-		M._mapped = true
+	for _, buf in ipairs({ left_buf, right_buf }) do
+		vim.api.nvim_buf_set_keymap(
+			buf,
+			"n",
+			"l",
+			'<cmd>lua require("gitmovie")._on_nav(vim.v.count1)<CR>',
+			{ noremap = true, silent = true }
+		)
+		vim.api.nvim_buf_set_keymap(
+			buf,
+			"n",
+			"h",
+			'<cmd>lua require("gitmovie")._on_nav(-vim.v.count1)<CR>',
+			{ noremap = true, silent = true }
+		)
+		vim.api.nvim_buf_set_keymap(
+			buf,
+			"n",
+			"q",
+			'<cmd>lua require("gitmovie").stop()<CR>',
+			{ noremap = true, silent = true }
+		)
 	end
+	M._mapped = true
 end
 
 -- Build commits list (oldest first)
@@ -128,6 +129,9 @@ local function diff_lines(repo, hash)
 end
 
 local function render_right(lines)
+	if not M.diff_buf or not vim.api.nvim_buf_is_valid(M.diff_buf) then
+		return
+	end
 	vim.api.nvim_buf_set_lines(M.diff_buf, 0, -1, false, lines)
 	vim.api.nvim_buf_clear_namespace(M.diff_buf, M.ns, 0, -1)
 	for i, l in ipairs(lines) do
@@ -175,7 +179,7 @@ local function update_left_for_commit(hash, subject, date, changes)
 	table.insert(left_lines, "Help:")
 	table.insert(left_lines, "  h/l - Navigate commits")
 	table.insert(left_lines, "  q - Quit")
-	table.insert(left_lines, "  :GitMovie - Start player")
+	table.insert(left_lines, "  :GitMovieStart - Auto-play")
 	render_left(left_lines)
 end
 
@@ -207,7 +211,7 @@ function M._show_index(idx)
 	local changes = {}
 	local ch_out = vim.fn.system({ "git", "-C", M.repo, "diff-tree", "--no-commit-id", "--name-status", "-r", hash })
 	if vim.v.shell_error == 0 and ch_out and ch_out ~= "" then
-		for s in string.gmatch(ch_out, "[^\\n]+") do
+		for s in string.gmatch(ch_out, "[^\n]+") do
 			if s ~= "" then
 				table.insert(changes, s)
 			end
@@ -273,6 +277,7 @@ function M.stop()
 	M._commits = {}
 	M._index = 1
 	M._current = 0
+	M._mapped = false
 end
 
 function M.start(repo_path)
@@ -326,24 +331,43 @@ function M.start(repo_path)
 end
 
 function M.open_movie_player()
-	-- open the right and left panes side by side
+	local repo_path = M.repo or vim.fn.getcwd()
+	M.repo = repo_path
+
+	-- Load commits so navigation (h/l) works immediately
+	if not M._commits or #M._commits == 0 then
+		local commits = build_commits(repo_path)
+		if not vim.tbl_isempty(commits) then
+			M._commits = commits
+			M._index = 1
+			M._current = 0
+		end
+	end
+
 	ensure_window()
-	-- render left and right below
-    -- render left menu with help info
-	local left_lines = {
-		"GitMovie Player",
-		"",
-		"Help:",
-		"  h/l - Navigate commits",
-		"  q - Quit",
-		"  :GitMovie - Start player",
-		"",
-		"Use :GitMovieStart to begin",
-		"replaying commits from current",
-		"git repository.",
-	}
-	render_left(left_lines)
-	render_right({ "GitMovie Player", "", "Use 'h' and 'l' to navigate commits.", "Press 'q' to quit." })
+
+	if M._commits and #M._commits > 0 then
+		M._show_index(1)
+	else
+		local left_lines = {
+			"GitMovie Player",
+			"",
+			"Help:",
+			"  h/l - Navigate commits",
+			"  q - Quit",
+			"  :GitMovieStart - Auto-play",
+			"",
+			"Use :GitMovieStart to begin",
+			"replaying commits from current",
+			"git repository.",
+		}
+		render_left(left_lines)
+		render_right({ "GitMovie Player", "", "Use 'h' and 'l' to navigate commits.", "Press 'q' to quit." })
+	end
 end
+
+-- Expose internals for testing
+M._build_commits = build_commits
+M._diff_lines = diff_lines
 
 return M

@@ -1,6 +1,6 @@
 -- GitFlix: Neovim plugin entrypoints
 
-vim.keymap.set("n", "<leader>gm", function()
+vim.keymap.set("n", "<leader>gf", function()
 	require("gitflix").play()
 end, { desc = "GitFlix: play git history" })
 

@@ -18,7 +18,7 @@ GitFlix creates an animated visualization of your git history, showing each comm
 {
   'matthewalunni/gitflix.nvim',
   keys = {
-    { '<leader>gm', '<cmd>GitFlix<cr>', desc = 'GitFlix: play git history' },
+    { '<leader>gf', '<cmd>GitFlix<cr>', desc = 'GitFlix: play git history' },
   }
 }
 ```
@@ -37,7 +37,7 @@ Plug 'matthewalunni/gitflix.nvim'
 
 ## Usage
 
-1. Run `:GitFlix` (or press `<leader>gm`) from within a git repository.
+1. Run `:GitFlix` (or press `<leader>gf`) from within a git repository.
 2. A picker appears listing all commits — select the commit you want to start from.
 3. The animation begins, replaying each commit's diff from that point forward.
 

@@ -5,7 +5,7 @@ local M = {}
 function M.get_commits(repo)
 	local out = vim.fn.system({
 		"git", "-C", repo,
-		"log", "--reverse", "--all",
+		"log", "--reverse", "HEAD",
 		"--format=%H|%s|%ad",
 		"--date=short",
 	})

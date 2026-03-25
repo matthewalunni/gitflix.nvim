@@ -174,19 +174,38 @@ local function highlight_and_delete(buf, ns, line_nums, pause_ms, callback)
 	end, pause_ms)
 end
 
--- Insert lines one at a time (typewriter effect)
+-- Insert lines character by character (typing effect)
 -- insert_at: 0-indexed line number to insert before
--- Each line appears after delay_ms
-local function typewriter_lines(buf, insert_at, lines, delay_ms, callback)
+local function typewriter_lines(buf, insert_at, lines, _delay_ms, callback)
 	if #lines == 0 then
 		callback()
 		return
 	end
 	if S.cancel then return end
 
+	local char_delay = 15 -- ms per character
+
+	local function type_chars(line_str, char_idx, buf_line_pos, on_done)
+		if S.cancel then return end
+		if char_idx > #line_str then
+			on_done()
+			return
+		end
+		local partial = line_str:sub(1, char_idx)
+		vim.api.nvim_buf_set_option(buf, "modifiable", true)
+		vim.api.nvim_buf_set_lines(buf, buf_line_pos, buf_line_pos + 1, false, { partial })
+		vim.api.nvim_buf_set_option(buf, "modifiable", false)
+		vim.api.nvim_buf_add_highlight(buf, S.ns, "GitMovieAdd", buf_line_pos, 0, -1)
+		if S.win and vim.api.nvim_win_is_valid(S.win) then
+			vim.api.nvim_win_set_cursor(S.win, { buf_line_pos + 1, char_idx })
+		end
+		vim.defer_fn(function()
+			type_chars(line_str, char_idx + 1, buf_line_pos, on_done)
+		end, char_delay)
+	end
+
 	local function insert_next(idx, pos)
 		if idx > #lines then
-			-- Clear add highlights after a short delay
 			vim.defer_fn(function()
 				vim.api.nvim_buf_clear_namespace(buf, S.ns, 0, -1)
 				callback()
@@ -195,21 +214,27 @@ local function typewriter_lines(buf, insert_at, lines, delay_ms, callback)
 		end
 		if S.cancel then return end
 
+		-- Insert empty line first, then fill it character by character
 		vim.api.nvim_buf_set_option(buf, "modifiable", true)
-		vim.api.nvim_buf_set_lines(buf, pos, pos, false, { lines[idx] })
+		vim.api.nvim_buf_set_lines(buf, pos, pos, false, { "" })
 		vim.api.nvim_buf_set_option(buf, "modifiable", false)
-
-		-- Highlight the new line green
 		vim.api.nvim_buf_add_highlight(buf, S.ns, "GitMovieAdd", pos, 0, -1)
-
-		-- Scroll to show inserted line
 		if S.win and vim.api.nvim_win_is_valid(S.win) then
 			vim.api.nvim_win_set_cursor(S.win, { pos + 1, 0 })
 		end
 
-		vim.defer_fn(function()
-			insert_next(idx + 1, pos + 1)
-		end, delay_ms)
+		local line_str = lines[idx]
+		if #line_str == 0 then
+			vim.defer_fn(function()
+				insert_next(idx + 1, pos + 1)
+			end, char_delay)
+		else
+			type_chars(line_str, 1, pos, function()
+				vim.defer_fn(function()
+					insert_next(idx + 1, pos + 1)
+				end, char_delay)
+			end)
+		end
 	end
 
 	insert_next(1, insert_at)

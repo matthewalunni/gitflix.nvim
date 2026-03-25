@@ -285,10 +285,14 @@ local function animate_file_patch(patch, patch_num, total_patches, callback)
 
 	-- Update status bar
 	local c = S.commits[S.commit_idx]
+	-- Build progress bar
+	local filled = math.floor((S.commit_idx / S.total_commits) * 16)
+	local bar = string.rep("█", filled) .. string.rep("░", 16 - filled)
 	update_status(string.format(
-		"[Commit %d/%d] %s  %s  |  File %d/%d: %s  |  <Space> pause  q quit",
+		"  [%s]  Commit %d/%d  %s  %s  │  File %d/%d: %s  │  <Space> pause  q quit",
+		bar,
 		S.commit_idx, S.total_commits,
-		c.hash:sub(1, 8), c.subject,
+		c.hash:sub(1, 7), c.subject,
 		patch_num, total_patches,
 		patch.filepath
 	))

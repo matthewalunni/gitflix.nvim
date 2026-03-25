@@ -157,7 +157,7 @@ local function typewriter_lines(buf, insert_at, lines, delay_ms, callback)
 			vim.defer_fn(function()
 				vim.api.nvim_buf_clear_namespace(buf, S.ns, 0, -1)
 				callback()
-			end, 150)
+			end, 300)
 			return
 		end
 		if S.cancel then return end
@@ -224,11 +224,11 @@ local function animate_hunk(buf, hunk, line_offset, callback)
 	local adds = #add_texts
 	local delta = adds - dels
 
-	highlight_and_delete(buf, S.ns, del_positions, 400, function()
+	highlight_and_delete(buf, S.ns, del_positions, 800, function()
 		if S.cancel then return end
 		-- After deletions, additions insert at add_insert_at (which is now correct
 		-- since deleted lines are gone)
-		typewriter_lines(buf, add_insert_at, add_texts, 60, function()
+		typewriter_lines(buf, add_insert_at, add_texts, 120, function()
 			callback(line_offset + delta)
 		end)
 	end)
@@ -262,7 +262,7 @@ local function animate_file_patch(patch, patch_num, total_patches, callback)
 
 	if #patch.hunks == 0 then
 		-- No hunks (e.g. binary file or deleted file with no content diff)
-		vim.defer_fn(callback, 500)
+		vim.defer_fn(callback, 1000)
 		return
 	end
 
@@ -271,7 +271,7 @@ local function animate_file_patch(patch, patch_num, total_patches, callback)
 		if S.cancel then return end
 		if idx > #patch.hunks then
 			-- Done with this file, pause before moving on
-			vim.defer_fn(callback, 800)
+			vim.defer_fn(callback, 1600)
 			return
 		end
 

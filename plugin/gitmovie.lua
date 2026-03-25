@@ -1,6 +1,6 @@
 -- GitMovie: Neovim plugin entrypoints
 
-vim.keymap.set("n", "<leader>gms", function()
+vim.keymap.set("n", "<leader>gm", function()
 	require("gitmovie").play()
 end, { desc = "GitMovie: play git history" })
 

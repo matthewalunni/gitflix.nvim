@@ -18,7 +18,7 @@ GitMovie creates an animated visualization of your git history, showing each com
 {
   'matthewalunni/nvim-gitmovie',
   keys = {
-    { '<leader>gms', '<cmd>GitMovie<cr>', desc = 'GitMovie: play git history' },
+    { '<leader>gm', '<cmd>GitMovie<cr>', desc = 'GitMovie: play git history' },
   }
 }
 ```
@@ -37,7 +37,7 @@ Plug 'matthewalunni/nvim-gitmovie'
 
 ## Usage
 
-1. Run `:GitMovie` (or press `<leader>gms`) from within a git repository.
+1. Run `:GitMovie` (or press `<leader>gm`) from within a git repository.
 2. A picker appears listing all commits — select the commit you want to start from.
 3. The animation begins, replaying each commit's diff from that point forward.
 

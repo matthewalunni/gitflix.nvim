@@ -180,7 +180,9 @@ local function highlight_and_delete(buf, ns, line_nums, pause_ms, callback)
 			end
 			if idx > #sorted then
 				vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
-				callback(actual_dels)
+				vim.defer_fn(function()
+					callback(actual_dels)
+				end, 250)
 				return
 			end
 			local lnum = sorted[idx]

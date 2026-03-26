@@ -35,11 +35,8 @@ function M.get_file_at(repo, hash_ref, filepath)
 	if vim.v.shell_error ~= 0 then
 		return {}
 	end
-	local lines = {}
-	for line in out:gmatch("[^\n]*") do
-		table.insert(lines, line)
-	end
-	-- Remove trailing empty line that gmatch adds
+	local lines = vim.split(out, "\n", { plain = true })
+	-- Remove trailing empty entry from final newline
 	if lines[#lines] == "" then
 		table.remove(lines)
 	end

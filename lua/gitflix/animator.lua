@@ -147,10 +147,10 @@ end
 
 -- Highlight lines red, pause, then delete them
 -- line_nums: 0-indexed line numbers to delete
--- callback called after deletion
+-- callback(actual_dels) called after deletion with the count of lines actually removed
 local function highlight_and_delete(buf, ns, line_nums, pause_ms, callback)
 	if #line_nums == 0 then
-		callback()
+		callback(0)
 		return
 	end
 	if S.cancel then return end
@@ -163,14 +163,16 @@ local function highlight_and_delete(buf, ns, line_nums, pause_ms, callback)
 		-- Delete lines in reverse order to preserve line numbers
 		local sorted = vim.deepcopy(line_nums)
 		table.sort(sorted, function(a, b) return a > b end)
+		local actual_dels = 0
 		for _, lnum in ipairs(sorted) do
 			if lnum < vim.api.nvim_buf_line_count(buf) then
 				vim.api.nvim_buf_set_lines(buf, lnum, lnum + 1, false, {})
+				actual_dels = actual_dels + 1
 			end
 		end
 		vim.api.nvim_buf_set_option(buf, "modifiable", false)
 		vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
-		callback()
+		callback(actual_dels)
 	end, pause_ms)
 end
 
@@ -282,13 +284,14 @@ local function animate_hunk(buf, hunk, line_offset, callback)
 	end
 	flush_adds()
 
-	local dels  = #del_positions
 	local adds  = 0
 	for _, g in ipairs(add_groups) do adds = adds + #g.texts end
-	local delta = adds - dels
 
-	highlight_and_delete(buf, S.ns, del_positions, 800, function()
+	highlight_and_delete(buf, S.ns, del_positions, 800, function(actual_dels)
 		if S.cancel then return end
+		-- delta uses the actual deletion count so line_offset stays accurate
+		-- even if the bounds check skipped any out-of-range deletions.
+		local delta = adds - actual_dels
 		-- Insert each addition group at its correct position, adjusting for
 		-- lines already inserted by prior groups in this hunk.
 		local insert_offset = 0

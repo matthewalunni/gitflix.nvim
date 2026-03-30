@@ -395,6 +395,10 @@ local function animate_file_patch(patch, patch_num, total_patches, callback)
 			lines = git.get_file_at(S.repo, parent_ref, patch.old_filepath or patch.filepath)
 		end
 	else
+		-- For reverse: load the post-commit file state. For deleted files,
+		-- get_file_at returns {} because the file no longer exists at this
+		-- commit — which is the correct empty starting state for animating
+		-- the file being restored via inverted hunks.
 		lines = git.get_file_at(S.repo, S.commits[S.commit_idx].hash, patch.filepath)
 	end
 
@@ -612,6 +616,7 @@ function M.skip(delta)
 	local commits = S.commits
 	local dir     = S.direction
 	local target  = math.max(1, math.min(#commits, S.commit_idx + delta))
+	if target == S.commit_idx then return end
 	M.stop()
 	M.play_from(repo, commits, target, dir)
 end

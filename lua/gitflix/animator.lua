@@ -20,6 +20,7 @@ local S = {
 	paused = false,
 	cancel = false,
 	resume_fn = nil, -- called by resume() to continue paused chain
+	direction = 1, -- 1 = forward, -1 = reverse
 }
 
 -- Define highlight groups
@@ -135,6 +136,15 @@ local function open_file_window(filepath, lines)
 	vim.api.nvim_buf_set_keymap(buf, "n", "<Space>",
 		'<cmd>lua require("gitflix.animator").toggle_pause()<CR>',
 		{ noremap = true, silent = true })
+	vim.api.nvim_buf_set_keymap(buf, "n", "h",
+		'<cmd>lua require("gitflix.animator").skip(-1)<CR>',
+		{ noremap = true, silent = true })
+	vim.api.nvim_buf_set_keymap(buf, "n", "l",
+		'<cmd>lua require("gitflix.animator").skip(1)<CR>',
+		{ noremap = true, silent = true })
+	vim.api.nvim_buf_set_keymap(buf, "n", "r",
+		'<cmd>lua require("gitflix.animator").toggle_direction()<CR>',
+		{ noremap = true, silent = true })
 end
 
 -- Highlight specific lines in the buffer
@@ -143,6 +153,32 @@ local function highlight_lines(buf, ns, line_nums, hl_group)
 	for _, lnum in ipairs(line_nums) do
 		vim.api.nvim_buf_set_extmark(buf, ns, lnum, 0, { line_hl_group = hl_group })
 	end
+end
+
+-- Returns a copy of hunks with + and - ops swapped and old/new positions swapped.
+-- Used for reverse playback to undo a commit's changes.
+local function invert_hunks(hunks)
+	local inverted = {}
+	for _, h in ipairs(hunks) do
+		local new_lines = {}
+		for _, entry in ipairs(h.lines) do
+			if entry.op == "+" then
+				table.insert(new_lines, { op = "-", text = entry.text })
+			elseif entry.op == "-" then
+				table.insert(new_lines, { op = "+", text = entry.text })
+			else
+				table.insert(new_lines, entry)
+			end
+		end
+		table.insert(inverted, {
+			old_start = h.new_start,
+			old_count = h.new_count,
+			new_start = h.old_start,
+			new_count = h.old_count,
+			lines    = new_lines,
+		})
+	end
+	return inverted
 end
 
 -- Highlight lines red, pause, then delete them one at a time (bottom-to-top).
@@ -347,25 +383,39 @@ end
 local function animate_file_patch(patch, patch_num, total_patches, callback)
 	if S.cancel then return end
 
-	-- Get file content at parent commit (hash^ means parent)
-	local parent_ref = S.commits[S.commit_idx].hash .. "^"
+	-- Load the starting file state:
+	--   Forward: parent commit state (what existed before this commit)
+	--   Reverse: current commit state (what we're about to undo)
 	local lines
-	if patch.is_new then
-		lines = {}
+	if S.direction == 1 then
+		local parent_ref = S.commits[S.commit_idx].hash .. "^"
+		if patch.is_new then
+			lines = {}
+		else
+			lines = git.get_file_at(S.repo, parent_ref, patch.old_filepath or patch.filepath)
+		end
 	else
-		lines = git.get_file_at(S.repo, parent_ref, patch.old_filepath or patch.filepath)
+		-- For reverse: load the post-commit file state. For deleted files,
+		-- get_file_at returns {} because the file no longer exists at this
+		-- commit — which is the correct empty starting state for animating
+		-- the file being restored via inverted hunks.
+		lines = git.get_file_at(S.repo, S.commits[S.commit_idx].hash, patch.filepath)
 	end
 
-	-- Open file buffer with parent content
+	-- Invert hunks for reverse playback so additions become deletions and vice versa
+	local hunks = S.direction == -1 and invert_hunks(patch.hunks) or patch.hunks
+
+	-- Open file buffer with the starting content
 	open_file_window(patch.filepath, lines)
 
 	-- Update status bar
 	local c = S.commits[S.commit_idx]
-	-- Build progress bar
 	local filled = math.floor((S.commit_idx / S.total_commits) * 16)
 	local bar = string.rep("█", filled) .. string.rep("░", 16 - filled)
+	local dir_icon = S.direction == 1 and "▶" or "◀"
 	update_status(string.format(
-		"  [%s]  Commit %d/%d  %s  %s  │  File %d/%d: %s  │  <Space> pause  q quit",
+		"  %s  [%s]  Commit %d/%d  %s  %s  │  File %d/%d: %s  │  <Space> pause  h/l skip  r reverse  q quit",
+		dir_icon,
 		bar,
 		S.commit_idx, S.total_commits,
 		c.hash:sub(1, 7), c.subject,
@@ -374,7 +424,7 @@ local function animate_file_patch(patch, patch_num, total_patches, callback)
 	))
 	update_top_bar(patch.filepath, S.commit_idx, S.total_commits)
 
-	if #patch.hunks == 0 then
+	if #hunks == 0 then
 		-- No hunks (e.g. binary file or deleted file with no content diff)
 		vim.defer_fn(callback, 1000)
 		return
@@ -383,7 +433,7 @@ local function animate_file_patch(patch, patch_num, total_patches, callback)
 	-- Animate hunks sequentially with callback chain
 	local function do_hunk(idx, offset)
 		if S.cancel then return end
-		if idx > #patch.hunks then
+		if idx > #hunks then
 			-- Done with this file, pause before moving on
 			vim.defer_fn(callback, 1600)
 			return
@@ -396,7 +446,7 @@ local function animate_file_patch(patch, patch_num, total_patches, callback)
 			return
 		end
 
-		animate_hunk(S.buf, patch.hunks[idx], offset, function(new_offset)
+		animate_hunk(S.buf, hunks[idx], offset, function(new_offset)
 			do_hunk(idx + 1, new_offset)
 		end)
 	end
@@ -414,9 +464,13 @@ local function animate_commit(callback)
 		return
 	end
 
-	if S.commit_idx > #S.commits then
-		-- Movie finished
+	-- Check playback bounds
+	if S.direction == 1 and S.commit_idx > #S.commits then
 		update_status("GitFlix: replay finished  |  q quit")
+		return
+	end
+	if S.direction == -1 and S.commit_idx < 1 then
+		update_status("GitFlix: reached beginning  |  q quit")
 		return
 	end
 
@@ -439,7 +493,7 @@ local function animate_commit(callback)
 
 	if #file_patches == 0 then
 		-- Skip this commit (no text changes)
-		S.commit_idx = S.commit_idx + 1
+		S.commit_idx = S.commit_idx + S.direction
 		animate_commit(callback)
 		return
 	end
@@ -448,8 +502,8 @@ local function animate_commit(callback)
 	local function do_patch(idx)
 		if S.cancel then return end
 		if idx > #file_patches then
-			-- Move to next commit
-			S.commit_idx = S.commit_idx + 1
+			-- Move to next/previous commit
+			S.commit_idx = S.commit_idx + S.direction
 			animate_commit(callback)
 			return
 		end
@@ -470,7 +524,7 @@ local function animate_commit(callback)
 end
 
 -- Public: start playing from a given commit index
-function M.play_from(repo, commits, start_idx)
+function M.play_from(repo, commits, start_idx, direction)
 	M.stop() -- clean up any existing state
 
 	setup_highlights()
@@ -482,6 +536,7 @@ function M.play_from(repo, commits, start_idx)
 	S.paused = false
 	S.cancel = false
 	S.resume_fn = nil
+	S.direction = direction or 1
 
 	open_status_window()
 	open_top_bar()
@@ -527,7 +582,11 @@ end
 -- Public: pause animation
 function M.pause()
 	S.paused = true
-	update_status("GitFlix: PAUSED  |  <Space> resume  q quit")
+	local dir_icon = S.direction == 1 and "▶" or "◀"
+	update_status(string.format(
+		"GitFlix: PAUSED [%s]  |  <Space> resume  h/l skip  r reverse  q quit",
+		dir_icon
+	))
 end
 
 -- Public: resume animation
@@ -549,5 +608,30 @@ function M.toggle_pause()
 		M.pause()
 	end
 end
+
+-- Public: skip forward (delta=1) or backward (delta=-1) by one commit
+function M.skip(delta)
+	if #S.commits == 0 then return end
+	local repo    = S.repo
+	local commits = S.commits
+	local dir     = S.direction
+	local target  = math.max(1, math.min(#commits, S.commit_idx + delta))
+	if target == S.commit_idx then return end
+	M.stop()
+	M.play_from(repo, commits, target, dir)
+end
+
+-- Public: flip playback direction and restart at the current commit
+function M.toggle_direction()
+	if #S.commits == 0 then return end
+	local repo    = S.repo
+	local commits = S.commits
+	local idx     = S.commit_idx
+	local new_dir = S.direction == 1 and -1 or 1
+	M.stop()
+	M.play_from(repo, commits, idx, new_dir)
+end
+
+M._invert_hunks = invert_hunks
 
 return M

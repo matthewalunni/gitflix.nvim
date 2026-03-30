@@ -596,6 +596,28 @@ function M.toggle_pause()
 	end
 end
 
+-- Public: skip forward (delta=1) or backward (delta=-1) by one commit
+function M.skip(delta)
+	if #S.commits == 0 then return end
+	local repo    = S.repo
+	local commits = S.commits
+	local dir     = S.direction
+	local target  = math.max(1, math.min(#commits, S.commit_idx + delta))
+	M.stop()
+	M.play_from(repo, commits, target, dir)
+end
+
+-- Public: flip playback direction and restart at the current commit
+function M.toggle_direction()
+	if #S.commits == 0 then return end
+	local repo    = S.repo
+	local commits = S.commits
+	local idx     = S.commit_idx
+	local new_dir = S.direction == 1 and -1 or 1
+	M.stop()
+	M.play_from(repo, commits, idx, new_dir)
+end
+
 M._invert_hunks = invert_hunks
 
 return M

@@ -202,6 +202,7 @@ local function highlight_and_delete(buf, ns, line_nums, pause_ms, callback)
 
 	vim.defer_fn(function()
 		if S.cancel then return end
+		if not vim.api.nvim_buf_is_valid(buf) then return end
 		if S.paused then
 			S.resume_fn = function() highlight_and_delete(buf, ns, line_nums, 0, callback) end
 			return
@@ -210,6 +211,7 @@ local function highlight_and_delete(buf, ns, line_nums, pause_ms, callback)
 
 		local function delete_next(idx)
 			if S.cancel then return end
+			if not vim.api.nvim_buf_is_valid(buf) then return end
 			if S.paused then
 				S.resume_fn = function() delete_next(idx) end
 				return
@@ -250,6 +252,7 @@ local function typewriter_lines(buf, insert_at, lines, _delay_ms, callback)
 
 	local function type_chars(line_str, char_idx, buf_line_pos, on_done)
 		if S.cancel then return end
+		if not vim.api.nvim_buf_is_valid(buf) then return end
 		if S.paused then
 			S.resume_fn = function() type_chars(line_str, char_idx, buf_line_pos, on_done) end
 			return
@@ -273,12 +276,14 @@ local function typewriter_lines(buf, insert_at, lines, _delay_ms, callback)
 
 	local function insert_next(idx, pos)
 		if S.cancel then return end
+		if not vim.api.nvim_buf_is_valid(buf) then return end
 		if S.paused then
 			S.resume_fn = function() insert_next(idx, pos) end
 			return
 		end
 		if idx > #lines then
 			vim.defer_fn(function()
+				if not vim.api.nvim_buf_is_valid(buf) then return end
 				vim.api.nvim_buf_clear_namespace(buf, S.ns, 0, -1)
 				callback()
 			end, 300)

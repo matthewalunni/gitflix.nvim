@@ -374,25 +374,35 @@ end
 local function animate_file_patch(patch, patch_num, total_patches, callback)
 	if S.cancel then return end
 
-	-- Get file content at parent commit (hash^ means parent)
-	local parent_ref = S.commits[S.commit_idx].hash .. "^"
+	-- Load the starting file state:
+	--   Forward: parent commit state (what existed before this commit)
+	--   Reverse: current commit state (what we're about to undo)
 	local lines
-	if patch.is_new then
-		lines = {}
+	if S.direction == 1 then
+		local parent_ref = S.commits[S.commit_idx].hash .. "^"
+		if patch.is_new then
+			lines = {}
+		else
+			lines = git.get_file_at(S.repo, parent_ref, patch.old_filepath or patch.filepath)
+		end
 	else
-		lines = git.get_file_at(S.repo, parent_ref, patch.old_filepath or patch.filepath)
+		lines = git.get_file_at(S.repo, S.commits[S.commit_idx].hash, patch.filepath)
 	end
 
-	-- Open file buffer with parent content
+	-- Invert hunks for reverse playback so additions become deletions and vice versa
+	local hunks = S.direction == -1 and invert_hunks(patch.hunks) or patch.hunks
+
+	-- Open file buffer with the starting content
 	open_file_window(patch.filepath, lines)
 
 	-- Update status bar
 	local c = S.commits[S.commit_idx]
-	-- Build progress bar
 	local filled = math.floor((S.commit_idx / S.total_commits) * 16)
 	local bar = string.rep("█", filled) .. string.rep("░", 16 - filled)
+	local dir_icon = S.direction == 1 and "▶" or "◀"
 	update_status(string.format(
-		"  [%s]  Commit %d/%d  %s  %s  │  File %d/%d: %s  │  <Space> pause  q quit",
+		"  %s  [%s]  Commit %d/%d  %s  %s  │  File %d/%d: %s  │  <Space> pause  h/l skip  r reverse  q quit",
+		dir_icon,
 		bar,
 		S.commit_idx, S.total_commits,
 		c.hash:sub(1, 7), c.subject,
@@ -401,7 +411,7 @@ local function animate_file_patch(patch, patch_num, total_patches, callback)
 	))
 	update_top_bar(patch.filepath, S.commit_idx, S.total_commits)
 
-	if #patch.hunks == 0 then
+	if #hunks == 0 then
 		-- No hunks (e.g. binary file or deleted file with no content diff)
 		vim.defer_fn(callback, 1000)
 		return
@@ -410,7 +420,7 @@ local function animate_file_patch(patch, patch_num, total_patches, callback)
 	-- Animate hunks sequentially with callback chain
 	local function do_hunk(idx, offset)
 		if S.cancel then return end
-		if idx > #patch.hunks then
+		if idx > #hunks then
 			-- Done with this file, pause before moving on
 			vim.defer_fn(callback, 1600)
 			return
@@ -423,7 +433,7 @@ local function animate_file_patch(patch, patch_num, total_patches, callback)
 			return
 		end
 
-		animate_hunk(S.buf, patch.hunks[idx], offset, function(new_offset)
+		animate_hunk(S.buf, hunks[idx], offset, function(new_offset)
 			do_hunk(idx + 1, new_offset)
 		end)
 	end
@@ -441,9 +451,13 @@ local function animate_commit(callback)
 		return
 	end
 
-	if S.commit_idx > #S.commits then
-		-- Movie finished
+	-- Check playback bounds
+	if S.direction == 1 and S.commit_idx > #S.commits then
 		update_status("GitFlix: replay finished  |  q quit")
+		return
+	end
+	if S.direction == -1 and S.commit_idx < 1 then
+		update_status("GitFlix: reached beginning  |  q quit")
 		return
 	end
 
@@ -466,7 +480,7 @@ local function animate_commit(callback)
 
 	if #file_patches == 0 then
 		-- Skip this commit (no text changes)
-		S.commit_idx = S.commit_idx + 1
+		S.commit_idx = S.commit_idx + S.direction
 		animate_commit(callback)
 		return
 	end
@@ -475,8 +489,8 @@ local function animate_commit(callback)
 	local function do_patch(idx)
 		if S.cancel then return end
 		if idx > #file_patches then
-			-- Move to next commit
-			S.commit_idx = S.commit_idx + 1
+			-- Move to next/previous commit
+			S.commit_idx = S.commit_idx + S.direction
 			animate_commit(callback)
 			return
 		end
@@ -555,7 +569,11 @@ end
 -- Public: pause animation
 function M.pause()
 	S.paused = true
-	update_status("GitFlix: PAUSED  |  <Space> resume  q quit")
+	local dir_icon = S.direction == 1 and "▶" or "◀"
+	update_status(string.format(
+		"GitFlix: PAUSED [%s]  |  <Space> resume  h/l skip  r reverse  q quit",
+		dir_icon
+	))
 end
 
 -- Public: resume animation

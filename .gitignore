@@ -49,3 +49,9 @@ coverage/
 
 # Luarocks
 luarocks-
+
+# Superpowers
+docs/superpowers/
+
+# Git worktrees
+.worktrees/

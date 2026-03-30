@@ -146,6 +146,32 @@ local function highlight_lines(buf, ns, line_nums, hl_group)
 	end
 end
 
+-- Returns a copy of hunks with + and - ops swapped and old/new positions swapped.
+-- Used for reverse playback to undo a commit's changes.
+local function invert_hunks(hunks)
+	local inverted = {}
+	for _, h in ipairs(hunks) do
+		local new_lines = {}
+		for _, entry in ipairs(h.lines) do
+			if entry.op == "+" then
+				table.insert(new_lines, { op = "-", text = entry.text })
+			elseif entry.op == "-" then
+				table.insert(new_lines, { op = "+", text = entry.text })
+			else
+				table.insert(new_lines, entry)
+			end
+		end
+		table.insert(inverted, {
+			old_start = h.new_start,
+			old_count = h.new_count,
+			new_start = h.old_start,
+			new_count = h.old_count,
+			lines    = new_lines,
+		})
+	end
+	return inverted
+end
+
 -- Highlight lines red, pause, then delete them one at a time (bottom-to-top).
 -- line_nums: 0-indexed line numbers to delete
 -- callback(actual_dels) called after deletion with the count of lines actually removed
@@ -551,5 +577,7 @@ function M.toggle_pause()
 		M.pause()
 	end
 end
+
+M._invert_hunks = invert_hunks
 
 return M
